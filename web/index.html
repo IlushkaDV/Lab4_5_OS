@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мониторинг температуры</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .current-temp {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .current-temp h2 {
+            font-size: 1.5em;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .current-temp .temp-value {
+            font-size: 4em;
+            font-weight: bold;
+            color: #e74c3c;
+            margin: 10px 0;
+        }
+        .current-temp .last-update {
+            color: #666;
+            font-size: 0.9em;
+        }
+        .charts {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        .chart-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .chart-card h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+        canvas {
+            max-width: 100%;
+            height: 300px !important;
+        }
+        .controls {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .controls h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+        .period-selector {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        button.active {
+            background: #764ba2;
+            box-shadow: 0 5px 15px rgba(118, 75, 162, 0.4);
+        }
+        .stats-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .stats-table th,
+        .stats-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .stats-table th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+        .stats-table tr:hover {
+            background: #f5f5f5;
+        }
+        .error-message {
+            color: #e74c3c;
+            text-align: center;
+            padding: 15px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌡️ Мониторинг температуры</h1>
+
+        <div class="current-temp">
+            <h2>Текущая температура</h2>
+            <div class="temp-value" id="currentTemp">-- °C</div>
+            <div class="last-update" id="lastUpdate">Обновление...</div>
+        </div>
+
+        <div class="controls">
+            <h3>📈 Период отображения:</h3>
+            <div class="period-selector">
+                <button class="period-btn active" data-seconds="60">1 минута</button>
+                <button class="period-btn" data-seconds="300">5 минут</button>
+                <button class="period-btn" data-seconds="600">10 минут</button>
+            </div>
+        </div>
+
+        <div class="charts">
+            <div class="chart-card">
+                <h3>🌡️ Температура (сырые данные)</h3>
+                <canvas id="rawChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>📊 Часовые средние</h3>
+                <canvas id="hourlyChart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>📈 Дневные средние</h3>
+                <canvas id="dailyChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <h3>📋 Статистика по периодам</h3>
+            <table class="stats-table" id="statsTable">
+                <thead>
+                    <tr>
+                        <th>Время</th>
+                        <th>Средняя</th>
+                        <th>Минимум</th>
+                        <th>Максимум</th>
+                        <th>Измерений</th>
+                    </tr>
+                </thead>
+                <tbody id="statsTableBody">
+                    <tr>
+                        <td colspan="5" style="text-align: center;">Загрузка данных...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080/api';
+        let currentSeconds = 60;
+        let rawChart, hourlyChart, dailyChart;
+
+        // Инициализация графиков
+        function initCharts() {
+            const ctx1 = document.getElementById('rawChart').getContext('2d');
+            const ctx2 = document.getElementById('hourlyChart').getContext('2d');
+            const ctx3 = document.getElementById('dailyChart').getContext('2d');
+
+            rawChart = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Температура',
+                        data: [],
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'second',
+                                displayFormats: {
+                                    second: 'HH:mm:ss'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Время'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Температура (°C)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    }
+                }
+            });
+
+            hourlyChart = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    datasets: [
+                        {
+                            label: 'Средняя',
+                            data: [],
+                            backgroundColor: 'rgba(52, 152, 219, 0.7)',
+                            borderColor: 'rgba(52, 152, 219, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Минимум',
+                            data: [],
+                            backgroundColor: 'rgba(46, 204, 113, 0.7)',
+                            borderColor: 'rgba(46, 204, 113, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Максимум',
+                            data: [],
+                            backgroundColor: 'rgba(231, 76, 60, 0.7)',
+                            borderColor: 'rgba(231, 76, 60, 1)',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'second',
+                                displayFormats: {
+                                    second: 'HH:mm:ss'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Время'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Температура (°C)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    }
+                }
+            });
+
+            dailyChart = new Chart(ctx3, {
+                type: 'bar',
+                data: {
+                    datasets: [
+                        {
+                            label: 'Средняя',
+                            data: [],
+                            backgroundColor: 'rgba(155, 89, 182, 0.7)',
+                            borderColor: 'rgba(155, 89, 182, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Минимум',
+                            data: [],
+                            backgroundColor: 'rgba(46, 204, 113, 0.7)',
+                            borderColor: 'rgba(46, 204, 113, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Максимум',
+                            data: [],
+                            backgroundColor: 'rgba(231, 76, 60, 0.7)',
+                            borderColor: 'rgba(231, 76, 60, 1)',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'second',
+                                displayFormats: {
+                                    second: 'HH:mm:ss'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Время'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Температура (°C)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // Загрузка текущей температуры
+        async function loadCurrentTemp() {
+            try {
+                const response = await fetch(`${API_BASE}/current`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                document.getElementById('currentTemp').textContent = `${data.temperature.toFixed(1)} °C`;
+                const date = new Date(data.timestamp * 1000);
+                document.getElementById('lastUpdate').textContent = `Последнее обновление: ${date.toLocaleTimeString('ru-RU')}`;
+            } catch (error) {
+                console.error('Ошибка загрузки текущей температуры:', error);
+                document.getElementById('currentTemp').textContent = '❌ Ошибка';
+            }
+        }
+
+        // Обновление всех данных
+        function refreshAll() {
+            const now = Math.floor(Date.now() / 1000);
+            const from = now - currentSeconds;
+
+            loadCurrentTemp();
+
+            // Сырые данные
+            fetch(`${API_BASE}/raw?from=${from}&to=${now}`)
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response.json();
+                })
+                .then(data => {
+                    if (data && data.data && Array.isArray(data.data)) {
+                        rawChart.data.datasets[0].data = data.data.map(d => ({
+                            x: d.timestamp * 1000,
+                            y: d.temperature
+                        }));
+                        rawChart.update();
+                    }
+                })
+                .catch(error => {
+                    console.error('Ошибка загрузки сырых данных:', error);
+                    rawChart.data.datasets[0].data = [];
+                    rawChart.update();
+                });
+
+            // Часовые статистики
+            fetch(`${API_BASE}/hourly?from=${from}&to=${now}`)
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response.json();
+                })
+                .then(data => {
+                    if (data && data.data && Array.isArray(data.data)) {
+                        hourlyChart.data.datasets[0].data = data.data.map(d => ({ x: d.timestamp * 1000, y: d.avg }));
+                        hourlyChart.data.datasets[1].data = data.data.map(d => ({ x: d.timestamp * 1000, y: d.min }));
+                        hourlyChart.data.datasets[2].data = data.data.map(d => ({ x: d.timestamp * 1000, y: d.max }));
+                        hourlyChart.update();
+                    }
+                })
+                .catch(error => {
+                    console.error('Ошибка загрузки часовой статистики:', error);
+                    hourlyChart.data.datasets.forEach(ds => ds.data = []);
+                    hourlyChart.update();
+                });
+
+            // Дневные статистики
+            fetch(`${API_BASE}/daily?from=${from}&to=${now}`)
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response.json();
+                })
+                .then(data => {
+                    if (data && data.data && Array.isArray(data.data)) {
+                        dailyChart.data.datasets[0].data = data.data.map(d => ({ x: d.timestamp * 1000, y: d.avg }));
+                        dailyChart.data.datasets[1].data = data.data.map(d => ({ x: d.timestamp * 1000, y: d.min }));
+                        dailyChart.data.datasets[2].data = data.data.map(d => ({ x: d.timestamp * 1000, y: d.max }));
+                        dailyChart.update();
+
+                        // Обновление таблицы
+                        const tbody = document.getElementById('statsTableBody');
+                        if (data.data.length > 0) {
+                            tbody.innerHTML = data.data.map(d => {
+                                const date = new Date(d.timestamp * 1000);
+                                return `
+                                    <tr>
+                                        <td>${date.toLocaleTimeString('ru-RU')}</td>
+                                        <td>${d.avg.toFixed(1)} °C</td>
+                                        <td>${d.min.toFixed(1)} °C</td>
+                                        <td>${d.max.toFixed(1)} °C</td>
+                                        <td>${d.count}</td>
+                                    </tr>
+                                `;
+                            }).join('');
+                        } else {
+                            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Нет данных за выбранный период</td></tr>';
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Ошибка загрузки дневной статистики:', error);
+                    dailyChart.data.datasets.forEach(ds => ds.data = []);
+                    dailyChart.update();
+                    document.getElementById('statsTableBody').innerHTML = '<tr><td colspan="5" class="error-message">Ошибка загрузки данных</td></tr>';
+                });
+        }
+
+        // Обработчики кнопок
+        document.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentSeconds = parseInt(btn.dataset.seconds);
+                refreshAll();
+            });
+        });
+
+        // Автообновление каждые 3 секунды
+        setInterval(refreshAll, 3000);
+
+        // Инициализация при загрузке страницы
+        window.onload = () => {
+            initCharts();
+            refreshAll();
+        };
+    </script>
+</body>
+</html>

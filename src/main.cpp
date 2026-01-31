@@ -10,12 +10,17 @@
 #include <termios.h>
 #include <vector>
 #include <cstdlib>
+#include <ctime>
+#include <algorithm>
 #include "../include/circular_buffer.h"
+#include "../include/database.h"
+#include "httplib.h"
 
-const char* RAW_LOG = "temperature_raw.log";
-const char* HOURLY_LOG = "temperature_hourly.log";
-const char* DAILY_LOG = "temperature_daily.log";
+const char* DB_FILE = "temperature.db";
+const int HTTP_PORT = 8080;
+const char* WEB_DIR = "../web";
 
+Database* db;
 CircularBuffer raw_buffer(24 * 3600);
 CircularBuffer hourly_buffer(3600);
 CircularBuffer daily_buffer(24 * 3600);
@@ -31,105 +36,6 @@ std::string get_timestamp(time_t t = time(nullptr)) {
     return oss.str();
 }
 
-void write_to_file(const char* filename, const std::string& line) {
-    std::ofstream file(filename, std::ios::app);
-    if (file) {
-        file << line << std::endl;
-        file.close();
-    }
-}
-
-void rotate_hourly_log() {
-    std::ifstream in(HOURLY_LOG);
-    std::vector<std::string> lines;
-    std::string line;
-    while (std::getline(in, line)) lines.push_back(line);
-    in.close();
-
-    if (lines.size() > 720) {
-        lines.erase(lines.begin(), lines.end() - 720);
-        std::ofstream out(HOURLY_LOG);
-        for (const auto& l : lines) out << l << std::endl;
-    }
-}
-
-void rotate_daily_log() {
-    time_t now = time(nullptr);
-    std::tm tm;
-    localtime_r(&now, &tm);
-    std::ostringstream yearly_name;
-    yearly_name << "temperature_daily_" << (1900 + tm.tm_year) << ".log";
-
-    if (std::string(DAILY_LOG) != yearly_name.str()) {
-        std::rename(DAILY_LOG, yearly_name.str().c_str());
-    }
-}
-
-void log_raw(double temp) {
-    raw_buffer.add(temp);
-    std::string line = get_timestamp() + " | " + std::to_string(temp) + " °C";
-    write_to_file(RAW_LOG, line);
-
-    std::ifstream in(RAW_LOG);
-    std::vector<std::string> lines;
-    std::string l;
-    while (std::getline(in, l)) lines.push_back(l);
-    in.close();
-
-    if (!lines.empty()) {
-        time_t cutoff = time(nullptr) - 24 * 3600;
-        size_t first_valid = 0;
-        for (size_t i = 0; i < lines.size(); ++i) {
-            if (lines[i].find('|') != std::string::npos) {
-                std::string ts = lines[i].substr(0, 19);
-                std::tm tm = {};
-                std::istringstream ss(ts);
-                ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
-                if (mktime(&tm) >= cutoff) {
-                    first_valid = i;
-                    break;
-                }
-            }
-        }
-        if (first_valid > 0) {
-            lines.erase(lines.begin(), lines.begin() + first_valid);
-            std::ofstream out(RAW_LOG);
-            for (const auto& line : lines) out << line << std::endl;
-        }
-    }
-}
-
-void check_hourly(time_t now) {
-    std::tm tm;
-    localtime_r(&now, &tm);
-    time_t current_hour = now - (now % 3600);
-
-    if (current_hour > last_hour && hourly_buffer.size() > 0) {
-        double avg = hourly_buffer.calculate_average();
-        std::string line = get_timestamp(current_hour) + " | " + std::to_string(avg) + " °C (hourly avg)";
-        write_to_file(HOURLY_LOG, line);
-        hourly_buffer = CircularBuffer(3600);
-        rotate_hourly_log();
-        last_hour = current_hour;
-    }
-}
-
-void check_daily(time_t now) {
-    std::tm tm;
-    localtime_r(&now, &tm);
-    time_t current_day = now - (now % (24 * 3600));
-
-    if (current_day > last_day && daily_buffer.size() > 0) {
-        double avg = daily_buffer.calculate_average();
-        std::string line = get_timestamp(current_day) + " | " + std::to_string(avg) + " °C (daily avg)";
-        write_to_file(DAILY_LOG, line);
-        daily_buffer = CircularBuffer(24 * 3600);
-        rotate_daily_log();
-        last_day = current_day;
-    }
-}
-
-// Настройка последовательного порта
 bool setup_serial(int fd, int baudrate) {
     struct termios tty;
     if (tcgetattr(fd, &tty) != 0) {
@@ -168,13 +74,132 @@ bool setup_serial(int fd, int baudrate) {
     return true;
 }
 
+void calculate_and_save_hourly() {
+    if (hourly_buffer.size() == 0) return;
+    
+    double sum = 0.0, min_temp = 1000.0, max_temp = -1000.0;
+    size_t count = hourly_buffer.size();
+    
+    std::vector<TemperatureRecord> records = hourly_buffer.get_all();
+    for (const auto& r : records) {
+        sum += r.temperature;
+        min_temp = std::min(min_temp, r.temperature);
+        max_temp = std::max(max_temp, r.temperature);
+    }
+    
+    double avg = sum / count;
+    db->insert_hourly(avg, min_temp, max_temp, count);
+    
+    std::cout << "[" << get_timestamp() << "] 📊 Часовая статистика: avg=" << avg 
+              << "°C, min=" << min_temp << "°C, max=" << max_temp << "°C (" << count << " изм.)" << std::endl;
+}
+
+void calculate_and_save_daily() {
+    if (daily_buffer.size() == 0) return;
+    
+    double sum = 0.0, min_temp = 1000.0, max_temp = -1000.0;
+    size_t count = daily_buffer.size();
+    
+    std::vector<TemperatureRecord> records = daily_buffer.get_all();
+    for (const auto& r : records) {
+        sum += r.temperature;
+        min_temp = std::min(min_temp, r.temperature);
+        max_temp = std::max(max_temp, r.temperature);
+    }
+    
+    double avg = sum / count;
+    db->insert_daily(avg, min_temp, max_temp, count);
+    
+    std::cout << "[" << get_timestamp() << "] 📈 Дневная статистика: avg=" << avg 
+              << "°C, min=" << min_temp << "°C, max=" << max_temp << "°C (" << count << " изм.)" << std::endl;
+}
+
+void http_server_thread() {
+    httplib::Server svr;
+
+    svr.set_default_headers({{"Access-Control-Allow-Origin", "*"}});
+
+    svr.Get("/api/current", [](const httplib::Request&, httplib::Response& res) {
+        double temp = db->get_current_temperature();
+        std::ostringstream json;
+        json << "{\"temperature\":" << temp << ",\"timestamp\":" << time(nullptr) << "}";
+        res.set_content(json.str(), "application/json");
+    });
+
+    svr.Get("/api/raw", [](const httplib::Request& req, httplib::Response& res) {
+        auto from_param = req.get_param_value("from");
+        auto to_param = req.get_param_value("to");
+        time_t from = from_param.empty() ? (time(nullptr) - 3600) : std::stoll(from_param); // По умолчанию: последние 60 минут
+        time_t to = to_param.empty() ? time(nullptr) : std::stoll(to_param);
+        
+        auto data = db->get_raw_data(from, to);
+        std::ostringstream json;
+        json << "{\"data\":[";
+        for (size_t i = 0; i < data.size(); ++i) {
+            json << "{\"timestamp\":" << data[i].timestamp 
+                 << ",\"temperature\":" << data[i].temperature << "}";
+            if (i < data.size() - 1) json << ",";
+        }
+        json << "]}";
+        res.set_content(json.str(), "application/json");
+    });
+
+    svr.Get("/api/hourly", [](const httplib::Request& req, httplib::Response& res) {
+        auto from_param = req.get_param_value("from");
+        auto to_param = req.get_param_value("to");
+        time_t from = from_param.empty() ? (time(nullptr) - 7200) : std::stoll(from_param); // По умолчанию: последние 120 минут
+        time_t to = to_param.empty() ? time(nullptr) : std::stoll(to_param);
+        
+        auto data = db->get_hourly_stats(from, to);
+        std::ostringstream json;
+        json << "{\"data\":[";
+        for (size_t i = 0; i < data.size(); ++i) {
+            json << "{\"timestamp\":" << data[i].timestamp 
+                 << ",\"avg\":" << data[i].avg
+                 << ",\"min\":" << data[i].min
+                 << ",\"max\":" << data[i].max
+                 << ",\"count\":" << data[i].count << "}";
+            if (i < data.size() - 1) json << ",";
+        }
+        json << "]}";
+        res.set_content(json.str(), "application/json");
+    });
+
+    svr.Get("/api/daily", [](const httplib::Request& req, httplib::Response& res) {
+        auto from_param = req.get_param_value("from");
+        auto to_param = req.get_param_value("to");
+        time_t from = from_param.empty() ? (time(nullptr) - 86400) : std::stoll(from_param); // По умолчанию: последние 24 часа
+        time_t to = to_param.empty() ? time(nullptr) : std::stoll(to_param);
+        
+        auto data = db->get_daily_stats(from, to);
+        std::ostringstream json;
+        json << "{\"data\":[";
+        for (size_t i = 0; i < data.size(); ++i) {
+            json << "{\"timestamp\":" << data[i].timestamp 
+                 << ",\"avg\":" << data[i].avg
+                 << ",\"min\":" << data[i].min
+                 << ",\"max\":" << data[i].max
+                 << ",\"count\":" << data[i].count << "}";
+            if (i < data.size() - 1) json << ",";
+        }
+        json << "]}";
+        res.set_content(json.str(), "application/json");
+    });
+
+    svr.set_mount_point("/", WEB_DIR);
+
+    std::cout << "🌐 HTTP-сервер запущен на http://localhost:" << HTTP_PORT << std::endl;
+    svr.listen("0.0.0.0", HTTP_PORT);
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cerr << "Использование: " << argv[0] << " <порт> [скорость=9600]" << std::endl;
-        std::cerr << "Примеры портов:" << std::endl;
-        std::cerr << "  Linux:   /dev/ttyUSB0, /dev/ttyACM0, /dev/pts/5" << std::endl;
+        std::cerr << "Пример: " << argv[0] << " /dev/pts/5 9600" << std::endl;
         return 1;
     }
+
+    db = new Database(DB_FILE);
 
     const char* port_name = argv[1];
     int fd = open(port_name, O_RDWR | O_NOCTTY | O_SYNC);
@@ -189,11 +214,14 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "✅ Подключено к " << port_name << " на 9600 бод" << std::endl;
-    std::cout << "Логи записываются в текущую папку:" << std::endl;
-    std::cout << "  • " << RAW_LOG << " (последние 24ч)" << std::endl;
-    std::cout << "  • " << HOURLY_LOG << " (последний месяц)" << std::endl;
-    std::cout << "  • " << DAILY_LOG << " (текущий год)" << std::endl;
+    std::cout << "📊 Данные сохраняются в базу данных: " << DB_FILE << std::endl;
+    std::cout << "🌐 HTTP API доступен на порту " << HTTP_PORT << std::endl;
+    std::cout << "📄 Веб-интерфейс: http://localhost:" << HTTP_PORT << "/" << std::endl;
+    std::cout << "🚀 ДЕМО-РЕЖИМ: статистика каждые 15 сек (час) и 60 сек (день)" << std::endl;
     std::cout << "Нажмите Ctrl+C для остановки..." << std::endl;
+
+    std::thread server_thread(http_server_thread);
+    server_thread.detach();
 
     char buffer[256];
     while (true) {
@@ -203,19 +231,40 @@ int main(int argc, char* argv[]) {
             char* endptr;
             double temp = std::strtod(buffer, &endptr);
             if (endptr != buffer && (*endptr == '\0' || *endptr == '\n' || *endptr == '\r')) {
-                std::cout << "[" << get_timestamp() << "] Получено: " << temp << " °C" << std::endl;
-                log_raw(temp);
+                std::cout << "[" << get_timestamp() << "] 🌡️  Получено: " << temp << " °C" << std::endl;
+                
+                db->insert_raw(temp);
+                db->cleanup_old_raw_data();
+                db->cleanup_old_hourly_stats();
+                
+                raw_buffer.add(temp);
                 hourly_buffer.add(temp);
                 daily_buffer.add(temp);
 
                 time_t now = time(nullptr);
-                check_hourly(now);
-                check_daily(now);
+                
+                // УСКОРЕННАЯ СТАТИСТИКА ДЛЯ ДЕМОНСТРАЦИИ:
+                // "Час" = 15 секунд
+                time_t current_hour = now - (now % 15);
+                if (current_hour > last_hour && hourly_buffer.size() > 0) {
+                    calculate_and_save_hourly();
+                    hourly_buffer = CircularBuffer(3600);
+                    last_hour = current_hour;
+                }
+
+                // "День" = 60 секунд
+                time_t current_day = now - (now % 60);
+                if (current_day > last_day && daily_buffer.size() > 0) {
+                    calculate_and_save_daily();
+                    daily_buffer = CircularBuffer(24 * 3600);
+                    last_day = current_day;
+                }
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     close(fd);
+    delete db;
     return 0;
 }

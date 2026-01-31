@@ -1,3 +1,4 @@
+
 #pragma once
 #include <vector>
 #include <string>
@@ -38,5 +39,10 @@ public:
         data.erase(it, data.end());
     }
 
-    size_t size() const { return data.size(); }
+   size_t size() const { return data.size(); }
+
+    // МЕТОД get_all ДОБАВЛЕН
+    std::vector<TemperatureRecord> get_all() const {
+        return data;
+    }
 };

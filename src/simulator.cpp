@@ -86,7 +86,7 @@ int main(int argc, char* argv[]) {
         double temp = dis(gen);
         char buf[32];
         int len = std::snprintf(buf, sizeof(buf), "%.1f\n", temp);
-        write(fd, buf, len);
+	(void)write(fd, buf, len);  // Игнорируем возвращаемое значение
         std::cout << "[" << get_timestamp() << "] Отправлено: " << temp << " °C" << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
