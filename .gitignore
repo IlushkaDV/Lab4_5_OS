@@ -1,0 +1,25 @@
+# Бинарные файлы и сборка
+*.o
+*.a
+*.so
+*.pro.user
+Makefile
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+build/
+*.exe
+*.out
+
+# Временные файлы
+*~
+*.swp
+*.swo
+
+# IDE/редактор файлы
+.vscode/
+.idea/
+*.code-workspace
+
+# macOS
+.DS_Store
