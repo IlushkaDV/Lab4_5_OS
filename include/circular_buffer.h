@@ -41,7 +41,6 @@ public:
 
    size_t size() const { return data.size(); }
 
-    // МЕТОД get_all ДОБАВЛЕН
     std::vector<TemperatureRecord> get_all() const {
         return data;
     }
