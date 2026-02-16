@@ -75,7 +75,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "✅ Симулятор запущен на " << port_name << " (9600 бод)" << std::endl;
+    std::cout << " Симулятор запущен на " << port_name << " (9600 бод)" << std::endl;
     std::cout << "Генерация температуры от 18.0 до 28.0 °C каждые 5 секунд..." << std::endl;
 
     std::random_device rd;
@@ -86,7 +86,7 @@ int main(int argc, char* argv[]) {
         double temp = dis(gen);
         char buf[32];
         int len = std::snprintf(buf, sizeof(buf), "%.1f\n", temp);
-	(void)write(fd, buf, len);  // Игнорируем возвращаемое значение
+	(void)write(fd, buf, len);  
         std::cout << "[" << get_timestamp() << "] Отправлено: " << temp << " °C" << std::endl;
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
