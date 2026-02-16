@@ -16,7 +16,7 @@ public:
             std::cerr << "Ошибка открытия БД: " << sqlite3_errmsg(db) << std::endl;
             sqlite3_close(db);
         } else {
-            std::cout << "✅ База данных открыта: " << filename << std::endl;
+            std::cout << " База данных открыта: " << filename << std::endl;
             create_tables();
         }
     }
