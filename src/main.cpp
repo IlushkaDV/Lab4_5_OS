@@ -90,7 +90,7 @@ void calculate_and_save_hourly() {
     double avg = sum / count;
     db->insert_hourly(avg, min_temp, max_temp, count);
     
-    std::cout << "[" << get_timestamp() << "] 📊 Часовая статистика: avg=" << avg 
+    std::cout << "[" << get_timestamp() << "]  Часовая статистика: avg=" << avg 
               << "°C, min=" << min_temp << "°C, max=" << max_temp << "°C (" << count << " изм.)" << std::endl;
 }
 
@@ -110,7 +110,7 @@ void calculate_and_save_daily() {
     double avg = sum / count;
     db->insert_daily(avg, min_temp, max_temp, count);
     
-    std::cout << "[" << get_timestamp() << "] 📈 Дневная статистика: avg=" << avg 
+    std::cout << "[" << get_timestamp() << "]  Дневная статистика: avg=" << avg 
               << "°C, min=" << min_temp << "°C, max=" << max_temp << "°C (" << count << " изм.)" << std::endl;
 }
 
@@ -129,7 +129,7 @@ void http_server_thread() {
     svr.Get("/api/raw", [](const httplib::Request& req, httplib::Response& res) {
         auto from_param = req.get_param_value("from");
         auto to_param = req.get_param_value("to");
-        time_t from = from_param.empty() ? (time(nullptr) - 3600) : std::stoll(from_param); // По умолчанию: последние 60 минут
+        time_t from = from_param.empty() ? (time(nullptr) - 3600) : std::stoll(from_param); 
         time_t to = to_param.empty() ? time(nullptr) : std::stoll(to_param);
         
         auto data = db->get_raw_data(from, to);
@@ -147,7 +147,7 @@ void http_server_thread() {
     svr.Get("/api/hourly", [](const httplib::Request& req, httplib::Response& res) {
         auto from_param = req.get_param_value("from");
         auto to_param = req.get_param_value("to");
-        time_t from = from_param.empty() ? (time(nullptr) - 7200) : std::stoll(from_param); // По умолчанию: последние 120 минут
+        time_t from = from_param.empty() ? (time(nullptr) - 7200) : std::stoll(from_param);
         time_t to = to_param.empty() ? time(nullptr) : std::stoll(to_param);
         
         auto data = db->get_hourly_stats(from, to);
@@ -168,7 +168,7 @@ void http_server_thread() {
     svr.Get("/api/daily", [](const httplib::Request& req, httplib::Response& res) {
         auto from_param = req.get_param_value("from");
         auto to_param = req.get_param_value("to");
-        time_t from = from_param.empty() ? (time(nullptr) - 86400) : std::stoll(from_param); // По умолчанию: последние 24 часа
+        time_t from = from_param.empty() ? (time(nullptr) - 86400) : std::stoll(from_param); 
         time_t to = to_param.empty() ? time(nullptr) : std::stoll(to_param);
         
         auto data = db->get_daily_stats(from, to);
@@ -213,11 +213,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "✅ Подключено к " << port_name << " на 9600 бод" << std::endl;
-    std::cout << "📊 Данные сохраняются в базу данных: " << DB_FILE << std::endl;
-    std::cout << "🌐 HTTP API доступен на порту " << HTTP_PORT << std::endl;
-    std::cout << "📄 Веб-интерфейс: http://localhost:" << HTTP_PORT << "/" << std::endl;
-    std::cout << "🚀 ДЕМО-РЕЖИМ: статистика каждые 15 сек (час) и 60 сек (день)" << std::endl;
+    std::cout << " Подключено к " << port_name << " на 9600 бод" << std::endl;
+    std::cout << " Данные сохраняются в базу данных: " << DB_FILE << std::endl;
+    std::cout << " HTTP API доступен на порту " << HTTP_PORT << std::endl;
+    std::cout << " Веб-интерфейс: http://localhost:" << HTTP_PORT << "/" << std::endl;
     std::cout << "Нажмите Ctrl+C для остановки..." << std::endl;
 
     std::thread server_thread(http_server_thread);
@@ -231,7 +230,7 @@ int main(int argc, char* argv[]) {
             char* endptr;
             double temp = std::strtod(buffer, &endptr);
             if (endptr != buffer && (*endptr == '\0' || *endptr == '\n' || *endptr == '\r')) {
-                std::cout << "[" << get_timestamp() << "] 🌡️  Получено: " << temp << " °C" << std::endl;
+                std::cout << "[" << get_timestamp() << "]   Получено: " << temp << " °C" << std::endl;
                 
                 db->insert_raw(temp);
                 db->cleanup_old_raw_data();
